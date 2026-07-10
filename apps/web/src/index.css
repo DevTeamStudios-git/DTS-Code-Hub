@@ -1,9 +1,8 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
 @layer base {
   body {
-    @apply bg-navy-900 text-gray-300;
+    background-color: #0B0E14;
+    color: #d1d5db;
   }
 }
