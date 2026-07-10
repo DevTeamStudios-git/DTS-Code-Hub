@@ -1,0 +1,167 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  username      String    @unique
+  email         String    @unique
+  displayName   String?
+  bio           String?
+  avatarUrl     String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  repositories  Repository[]
+  stars         Star[]
+  followers     Follow[]  @relation("UserFollowers")
+  following     Follow[]  @relation("UserFollowing")
+  issues        Issue[]
+  pullRequests  PullRequest[]
+  comments      Comment[]
+  
+  @@index([username])
+  @@index([email])
+}
+
+model Repository {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  visibility  Visibility @default(PUBLIC)
+  isTemplate  Boolean  @default(false)
+  healthScore Int?     // 0-100 repo health score
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  ownerId     String
+  owner       User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  
+  stars       Star[]
+  issues      Issue[]
+  pullRequests PullRequest[]
+  
+  @@unique([ownerId, name])
+  @@index([ownerId])
+  @@index([visibility])
+}
+
+model Star {
+  id           String   @id @default(cuid())
+  userId       String
+  repositoryId String
+  createdAt    DateTime @default(now())
+  
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repository   Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, repositoryId])
+  @@index([userId])
+  @@index([repositoryId])
+}
+
+model Follow {
+  id          String   @id @default(cuid())
+  followerId  String
+  followingId String
+  createdAt   DateTime @default(now())
+  
+  follower    User @relation("UserFollowers", fields: [followerId], references: [id], onDelete: Cascade)
+  following   User @relation("UserFollowing", fields: [followingId], references: [id], onDelete: Cascade)
+  
+  @@unique([followerId, followingId])
+  @@index([followerId])
+  @@index([followingId])
+}
+
+model Issue {
+  id          String     @id @default(cuid())
+  number      Int
+  title       String
+  body        String?
+  state       IssueState @default(OPEN)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  closedAt    DateTime?
+  
+  repositoryId String
+  repository   Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  
+  authorId    String
+  author      User @relation(fields: [authorId], references: [id])
+  
+  comments    Comment[]
+  
+  @@unique([repositoryId, number])
+  @@index([repositoryId])
+  @@index([authorId])
+  @@index([state])
+}
+
+model PullRequest {
+  id          String          @id @default(cuid())
+  number      Int
+  title       String
+  body        String?
+  state       PullRequestState @default(OPEN)
+  baseBranch  String
+  headBranch  String
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  mergedAt    DateTime?
+  closedAt    DateTime?
+  
+  repositoryId String
+  repository   Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  
+  authorId    String
+  author      User @relation(fields: [authorId], references: [id])
+  
+  comments    Comment[]
+  
+  @@unique([repositoryId, number])
+  @@index([repositoryId])
+  @@index([authorId])
+  @@index([state])
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  body      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  authorId  String
+  author    User @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  
+  issueId   String?
+  issue     Issue? @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  
+  pullRequestId String?
+  pullRequest   PullRequest? @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
+  
+  @@index([authorId])
+  @@index([issueId])
+  @@index([pullRequestId])
+}
+
+enum Visibility {
+  PUBLIC
+  PRIVATE
+}
+
+enum IssueState {
+  OPEN
+  CLOSED
+}
+
+enum PullRequestState {
+  OPEN
+  CLOSED
+  MERGED
+}
