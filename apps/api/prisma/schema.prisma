@@ -7,45 +7,162 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id            String    @id @default(cuid())
-  username      String    @unique
-  email         String    @unique
-  displayName   String?
-  bio           String?
-  avatarUrl     String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  
-  repositories  Repository[]
-  stars         Star[]
-  followers     Follow[]  @relation("UserFollowers")
-  following     Follow[]  @relation("UserFollowing")
-  issues        Issue[]
-  pullRequests  PullRequest[]
-  comments      Comment[]
-  
+// Profile extends Supabase auth.users
+model Profile {
+  id          String   @id @default(uuid()) @db.Uuid
+  username    String   @unique
+  displayName String?  @map("display_name")
+  bio         String?
+  avatarUrl   String?  @map("avatar_url")
+  location    String?
+  website     String?
+  company     String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  sshKeys             SSHKey[]
+  gpgKeys             GPGKey[]
+  oauthApps           OAuthApp[]
+  personalAccessTokens PersonalAccessToken[]
+  achievements         Achievement[]
+  contributions        Contribution[]
+  repositories         Repository[]
+  stars               Star[]
+  followers           Follow[]  @relation("UserFollowers")
+  following           Follow[]  @relation("UserFollowing")
+  issues              Issue[]
+  pullRequests        PullRequest[]
+  comments            Comment[]
+
+  @@map("profiles")
   @@index([username])
-  @@index([email])
+}
+
+model SSHKey {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  title       String
+  keyText     String    @map("key_text")
+  fingerprint String
+  createdAt   DateTime  @default(now()) @map("created_at")
+  lastUsedAt  DateTime? @map("last_used_at")
+
+  user        Profile   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("ssh_keys")
+  @@index([userId])
+  @@index([fingerprint])
+}
+
+model GPGKey {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  keyId     String   @map("key_id")
+  publicKey String   @map("public_key")
+  keyName   String?  @map("key_name")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user      Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("gpg_keys")
+  @@index([userId])
+  @@index([keyId])
+}
+
+model OAuthApp {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  name         String
+  description  String?
+  clientId     String   @unique @map("client_id")
+  clientSecret String   @map("client_secret")
+  redirectUris String[] @map("redirect_uris")
+  scopes       String[] @default([])
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  user         Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("oauth_apps")
+  @@index([userId])
+  @@index([clientId])
+}
+
+model PersonalAccessToken {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  name       String
+  tokenHash  String    @unique @map("token_hash")
+  scopes     String[]  @default([])
+  expiresAt  DateTime? @map("expires_at")
+  lastUsedAt DateTime? @map("last_used_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user       Profile   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("personal_access_tokens")
+  @@index([userId])
+  @@index([tokenHash])
+}
+
+model TwoFactorSecret {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @unique @map("user_id") @db.Uuid
+  secret      String
+  verified    Boolean  @default(false)
+  backupCodes String[] @map("backup_codes")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("two_factor_secrets")
+}
+
+model Achievement {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  badgeType String   @map("badge_type")
+  earnedAt  DateTime @default(now()) @map("earned_at")
+  metadata  Json?    @default("{}")
+
+  user      Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("achievements")
+  @@index([userId])
+  @@index([badgeType])
+}
+
+model Contribution {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @map("user_id") @db.Uuid
+  repositoryId     String?  @map("repository_id") @db.Uuid
+  contributionType String   @map("contribution_type")
+  contributionDate DateTime @map("contribution_date") @db.Date
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  user             Profile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("contributions")
+  @@index([userId])
+  @@index([contributionDate])
+  @@index([repositoryId])
 }
 
 model Repository {
-  id          String   @id @default(cuid())
+  id          String     @id @default(cuid())
   name        String
   description String?
-  visibility  Visibility @default(PUBLIC)
-  isTemplate  Boolean  @default(false)
-  healthScore Int?     // 0-100 repo health score
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
-  ownerId     String
-  owner       User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  
+  visibility  Visibility  @default(PUBLIC)
+  isTemplate  Boolean     @default(false)
+  healthScore Int?        // 0-100 repo health score
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  ownerId     String     @db.Uuid
+  owner       Profile     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
   stars       Star[]
   issues      Issue[]
   pullRequests PullRequest[]
-  
+
   @@unique([ownerId, name])
   @@index([ownerId])
   @@index([visibility])
@@ -53,13 +170,13 @@ model Repository {
 
 model Star {
   id           String   @id @default(cuid())
-  userId       String
+  userId       String   @db.Uuid
   repositoryId String
   createdAt    DateTime @default(now())
-  
-  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  user         Profile   @relation(fields: [userId], references: [id], onDelete: Cascade)
   repository   Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
-  
+
   @@unique([userId, repositoryId])
   @@index([userId])
   @@index([repositoryId])
@@ -67,13 +184,13 @@ model Star {
 
 model Follow {
   id          String   @id @default(cuid())
-  followerId  String
-  followingId String
+  followerId  String   @db.Uuid
+  followingId String   @db.Uuid
   createdAt   DateTime @default(now())
-  
-  follower    User @relation("UserFollowers", fields: [followerId], references: [id], onDelete: Cascade)
-  following   User @relation("UserFollowing", fields: [followingId], references: [id], onDelete: Cascade)
-  
+
+  follower    Profile @relation("UserFollowers", fields: [followerId], references: [id], onDelete: Cascade)
+  following   Profile @relation("UserFollowing", fields: [followingId], references: [id], onDelete: Cascade)
+
   @@unique([followerId, followingId])
   @@index([followerId])
   @@index([followingId])
@@ -88,15 +205,15 @@ model Issue {
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
   closedAt    DateTime?
-  
+
   repositoryId String
   repository   Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
-  
-  authorId    String
-  author      User @relation(fields: [authorId], references: [id])
-  
+
+  authorId    String   @db.Uuid
+  author      Profile   @relation(fields: [authorId], references: [id])
+
   comments    Comment[]
-  
+
   @@unique([repositoryId, number])
   @@index([repositoryId])
   @@index([authorId])
@@ -115,15 +232,15 @@ model PullRequest {
   updatedAt   DateTime        @updatedAt
   mergedAt    DateTime?
   closedAt    DateTime?
-  
+
   repositoryId String
   repository   Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
-  
-  authorId    String
-  author      User @relation(fields: [authorId], references: [id])
-  
+
+  authorId    String   @db.Uuid
+  author      Profile   @relation(fields: [authorId], references: [id])
+
   comments    Comment[]
-  
+
   @@unique([repositoryId, number])
   @@index([repositoryId])
   @@index([authorId])
@@ -135,16 +252,16 @@ model Comment {
   body      String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  
-  authorId  String
-  author    User @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  
+
+  authorId  String   @db.Uuid
+  author    Profile   @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
   issueId   String?
   issue     Issue? @relation(fields: [issueId], references: [id], onDelete: Cascade)
-  
+
   pullRequestId String?
   pullRequest   PullRequest? @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
-  
+
   @@index([authorId])
   @@index([issueId])
   @@index([pullRequestId])

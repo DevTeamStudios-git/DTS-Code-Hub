@@ -4,6 +4,7 @@ import './config';
 import express from 'express';
 import cors from 'cors';
 import authRoutes from './routes/auth';
+import userRoutes from './routes/users';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -16,6 +17,7 @@ app.get('/health', (req, res) => {
 });
 
 app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes);
 
 app.listen(PORT, () => {
   console.log(`DTS Code Hub API running on port ${PORT}`);
