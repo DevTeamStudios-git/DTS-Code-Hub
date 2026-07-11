@@ -1,227 +1,255 @@
 import { Router } from 'express';
-import { verifyToken } from '../lib/auth';
-import { PrismaClient } from '@prisma/client';
-import { getSupabaseAdmin } from '../lib/supabase';
+import { authMiddleware, optionalAuth } from '../middleware/auth.js';
+import type { AuthRequest } from '../middleware/auth.js';
+import { getSupabaseAdmin } from '../lib/supabase.js';
+import prisma from '../lib/prisma.js';
 
 const router = Router();
-const prisma = new PrismaClient();
-const supabaseAdmin = getSupabaseAdmin();
 
-// Middleware to verify JWT token
-const authenticate = async (req: any, res: any, next: any) => {
-  try {
-    const authHeader = req.headers.authorization;
-    
-    if (!authHeader) {
-      return res.status(401).json({ error: 'No authorization header' });
-    }
-    
-    const token = authHeader.replace('Bearer ', '');
-    const payload = await verifyToken(token);
-    
-    if (!payload) {
-      return res.status(401).json({ error: 'Invalid token' });
-    }
-    
-    req.user = payload;
-    next();
-  } catch (error) {
-    res.status(401).json({ error: 'Authentication failed' });
-  }
-};
-
-// Get public user profile by username
-router.get('/:username', async (req, res) => {
+// GET /api/users/:username — public profile
+router.get('/:username', optionalAuth, async (req: AuthRequest, res) => {
   try {
     const { username } = req.params;
-    
-    const profile = await prisma.profile.findUnique({
+    const user = await prisma.user.findUnique({
       where: { username },
-      include: {
-        repositories: {
-          where: { visibility: 'PUBLIC' },
-          orderBy: { createdAt: 'desc' },
-          take: 6
-        },
+      select: {
+        id: true,
+        username: true,
+        displayName: true,
+        bio: true,
+        avatarUrl: true,
+        location: true,
+        website: true,
+        company: true,
+        profileReadme: true,
+        createdAt: true,
         _count: {
           select: {
             repositories: true,
-            stars: true,
             followers: true,
-            following: true
-          }
-        }
-      }
+            following: true,
+            stars: true,
+          },
+        },
+      },
     });
 
-    if (!profile) {
-      return res.status(404).json({ error: 'User not found' });
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
     }
-    
-    res.json({
-      id: profile.id,
-      username: profile.username,
-      displayName: profile.displayName,
-      bio: profile.bio,
-      avatarUrl: profile.avatarUrl,
-      location: profile.location,
-      website: profile.website,
-      company: profile.company,
-      createdAt: profile.createdAt,
-      repositories: profile.repositories,
-      stats: profile._count
-    });
-  } catch (error) {
-    console.error('Get user error:', error);
+
+    const isFollowing = req.user
+      ? await prisma.follow.findUnique({
+          where: {
+            followerId_followingId: { followerId: req.user.userId, followingId: user.id },
+          },
+        })
+      : null;
+
+    res.json({ user: { ...user, isFollowing: !!isFollowing } });
+  } catch (err) {
+    console.error('Get user error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Get user's repositories
-router.get('/:username/repos', async (req, res) => {
+// PUT /api/users/me — update own profile
+router.put('/me', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const { displayName, bio, location, website, company, language } = req.body as {
+      displayName?: string;
+      bio?: string;
+      location?: string;
+      website?: string;
+      company?: string;
+      language?: string;
+    };
+
+    const updated = await prisma.user.update({
+      where: { id: req.user!.userId },
+      data: {
+        ...(displayName !== undefined && { displayName }),
+        ...(bio !== undefined && { bio }),
+        ...(location !== undefined && { location }),
+        ...(website !== undefined && { website }),
+        ...(company !== undefined && { company }),
+        ...(language !== undefined && { language }),
+      },
+      select: {
+        id: true,
+        username: true,
+        displayName: true,
+        bio: true,
+        avatarUrl: true,
+        location: true,
+        website: true,
+        company: true,
+        language: true,
+      },
+    });
+
+    res.json({ user: updated });
+  } catch (err) {
+    console.error('Update profile error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/users/me/avatar — upload avatar to Supabase Storage
+router.post('/me/avatar', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const { base64, contentType } = req.body as { base64: string; contentType: string };
+
+    if (!base64 || !contentType) {
+      res.status(400).json({ error: 'base64 and contentType are required' });
+      return;
+    }
+
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if (!allowedTypes.includes(contentType)) {
+      res.status(400).json({ error: 'Invalid image type' });
+      return;
+    }
+
+    const buffer = Buffer.from(base64, 'base64');
+    const filePath = `avatars/${req.user!.userId}/avatar`;
+    const supabaseAdmin = getSupabaseAdmin();
+
+    const { error: uploadError } = await supabaseAdmin.storage
+      .from('user-assets')
+      .upload(filePath, buffer, { contentType, upsert: true });
+
+    if (uploadError) {
+      res.status(500).json({ error: uploadError.message });
+      return;
+    }
+
+    const { data: urlData } = supabaseAdmin.storage
+      .from('user-assets')
+      .getPublicUrl(filePath);
+
+    await prisma.user.update({
+      where: { id: req.user!.userId },
+      data: { avatarUrl: urlData.publicUrl },
+    });
+
+    res.json({ avatarUrl: urlData.publicUrl });
+  } catch (err) {
+    console.error('Avatar upload error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/users/me/readme
+router.get('/me/readme', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user!.userId },
+      select: { profileReadme: true },
+    });
+    res.json({ readme: user?.profileReadme ?? '' });
+  } catch (err) {
+    console.error('Get readme error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// PUT /api/users/me/readme
+router.put('/me/readme', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const { content } = req.body as { content: string };
+    await prisma.user.update({
+      where: { id: req.user!.userId },
+      data: { profileReadme: content },
+    });
+    res.json({ message: 'README updated' });
+  } catch (err) {
+    console.error('Update readme error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/users/:username/repos
+router.get('/:username/repos', optionalAuth, async (req: AuthRequest, res) => {
   try {
     const { username } = req.params;
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 10;
-    
-    const profile = await prisma.profile.findUnique({
-      where: { username }
-    });
-
-    if (!profile) {
-      return res.status(404).json({ error: 'User not found' });
+    const user = await prisma.user.findUnique({ where: { username } });
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
     }
-    
-    const repositories = await prisma.repository.findMany({
-      where: { 
-        ownerId: profile.id,
-        visibility: 'PUBLIC'
+
+    const isOwner = req.user?.userId === user.id;
+
+    const repos = await prisma.repository.findMany({
+      where: {
+        ownerId: user.id,
+        ...(isOwner ? {} : { visibility: 'PUBLIC' }),
       },
-      orderBy: { createdAt: 'desc' },
-      skip: (page - 1) * limit,
-      take: limit
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        visibility: true,
+        createdAt: true,
+        updatedAt: true,
+        _count: { select: { stars: true } },
+      },
+      orderBy: { updatedAt: 'desc' },
     });
-    
-    const total = await prisma.repository.count({
-      where: { 
-        ownerId: profile.id,
-        visibility: 'PUBLIC'
-      }
-    });
-    
-    res.json({
-      repositories,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit)
-      }
-    });
-  } catch (error) {
-    console.error('Get user repos error:', error);
+
+    res.json({ repos });
+  } catch (err) {
+    console.error('Get repos error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Update current user profile
-router.put('/me', authenticate, async (req: any, res) => {
+// POST /api/users/:username/follow
+router.post('/:username/follow', authMiddleware, async (req: AuthRequest, res) => {
   try {
-    const { displayName, bio, location, website, company } = req.body;
-    
-    const profile = await prisma.profile.update({
-      where: { id: req.user.userId },
-      data: {
-        displayName,
-        bio,
-        location,
-        website,
-        company
-      }
-    });
-    
-    res.json({
-      id: profile.id,
-      username: profile.username,
-      displayName: profile.displayName,
-      bio: profile.bio,
-      avatarUrl: profile.avatarUrl,
-      location: profile.location,
-      website: profile.website,
-      company: profile.company,
-    });
-  } catch (error) {
-    console.error('Update profile error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Upload avatar
-router.post('/me/avatar', authenticate, async (req: any, res) => {
-  try {
-    const { avatarData } = req.body; // Base64 encoded image
-    
-    if (!avatarData) {
-      return res.status(400).json({ error: 'Avatar data is required' });
+    const { username } = req.params;
+    const target = await prisma.user.findUnique({ where: { username } });
+    if (!target) {
+      res.status(404).json({ error: 'User not found' });
+      return;
     }
-    
-    // Upload to Supabase Storage
-    const fileName = `${req.user.userId}/avatar.png`;
-    const { data, error } = await supabaseAdmin.storage
-      .from('avatars')
-      .upload(fileName, Buffer.from(avatarData, 'base64'), {
-        upsert: true,
-        contentType: 'image/png'
-      });
-    
-    if (error) {
-      return res.status(400).json({ error: error.message });
+    if (target.id === req.user!.userId) {
+      res.status(400).json({ error: 'Cannot follow yourself' });
+      return;
     }
-    
-    const { data: { publicUrl } } = supabaseAdmin.storage
-      .from('avatars')
-      .getPublicUrl(fileName);
-    
-    // Update profile with new avatar URL
-    const profile = await prisma.profile.update({
-      where: { id: req.user.userId },
-      data: { avatarUrl: publicUrl }
+
+    await prisma.follow.upsert({
+      where: { followerId_followingId: { followerId: req.user!.userId, followingId: target.id } },
+      create: { followerId: req.user!.userId, followingId: target.id },
+      update: {},
     });
-    
-    res.json({ avatarUrl: profile.avatarUrl });
-  } catch (error) {
-    console.error('Upload avatar error:', error);
+
+    res.json({ message: 'Following' });
+  } catch (err) {
+    console.error('Follow error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Get profile README
-router.get('/me/readme', authenticate, async (req: any, res) => {
+// DELETE /api/users/:username/follow
+router.delete('/:username/follow', authMiddleware, async (req: AuthRequest, res) => {
   try {
-    // For now, return a placeholder
-    // In Phase 4, this will be implemented with actual README storage
-    res.json({ 
-      readme: null,
-      message: 'Profile README not yet implemented'
-    });
-  } catch (error) {
-    console.error('Get readme error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
+    const { username } = req.params;
+    const target = await prisma.user.findUnique({ where: { username } });
+    if (!target) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
 
-// Update profile README
-router.put('/me/readme', authenticate, async (req: any, res) => {
-  try {
-    const { readme } = req.body;
-    
-    // For now, return a placeholder
-    // In Phase 4, this will be implemented with actual README storage
-    res.status(501).json({ 
-      error: 'Profile README not yet implemented'
+    await prisma.follow.deleteMany({
+      where: { followerId: req.user!.userId, followingId: target.id },
     });
-  } catch (error) {
-    console.error('Update readme error:', error);
+
+    res.json({ message: 'Unfollowed' });
+  } catch (err) {
+    console.error('Unfollow error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

@@ -1,140 +1,144 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { User } from '@supabase/supabase-js';
-import { createClient } from '@supabase/supabase-js';
+import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
+import type { Session, User } from '@supabase/supabase-js';
+import { supabase } from '../lib/supabase';
+import { api } from '../lib/api';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://lxikdnmthsvjnsupixwg.supabase.co';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4aWtkbm10aHN2am5zdXBpeHdnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM2MzUzODMsImV4cCI6MjA5OTIxMTM4M30.NRDR8lT4DiIBtmsTPPQBFD8Tb91eoui85qZQ7q9wbeM';
-
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
-interface AuthUser {
+interface UserProfile {
   id: string;
   email: string;
   username: string;
-  displayName: string;
-  avatarUrl?: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  bio: string | null;
+  location: string | null;
+  website: string | null;
+  company: string | null;
+  language: string;
 }
 
-interface AuthContextType {
-  user: AuthUser | null;
+interface AuthState {
+  session: Session | null;
+  user: User | null;
+  profile: UserProfile | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  signup: (email: string, password: string, username: string) => Promise<void>;
-  logout: () => Promise<void>;
-  refreshUser: () => Promise<void>;
+  requires2FA: boolean;
+  twoFactorVerified: boolean;
+}
+
+interface AuthContextType extends AuthState {
+  signIn: (email: string, password: string) => Promise<{ requires2FA: boolean }>;
+  signUp: (email: string, password: string, username: string) => Promise<void>;
+  signOut: () => Promise<void>;
+  verify2FA: (code: string) => Promise<void>;
+  refreshProfile: () => Promise<void>;
+  updateProfile: (data: Partial<UserProfile>) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [state, setState] = useState<AuthState>({
+    session: null,
+    user: null,
+    profile: null,
+    loading: true,
+    requires2FA: false,
+    twoFactorVerified: false,
+  });
 
-  useEffect(() => {
-    // Check for existing session
-    checkSession();
-
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        if (event === 'SIGNED_IN' && session?.user) {
-          await fetchUserProfile(session.user);
-        } else if (event === 'SIGNED_OUT') {
-          setUser(null);
-        }
-      }
-    );
-
-    return () => subscription.unsubscribe();
+  const fetchProfile = useCallback(async () => {
+    try {
+      const data = await api.get<{ user: UserProfile }>('/api/auth/session');
+      setState(prev => ({ ...prev, profile: data.user }));
+    } catch {
+      setState(prev => ({ ...prev, profile: null }));
+    }
   }, []);
 
-  const checkSession = async () => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        await fetchUserProfile(session.user);
-      }
-    } catch (error) {
-      console.error('Error checking session:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchUserProfile = async (supabaseUser: User) => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
-      
-      if (!token) {
-        setUser(null);
-        return;
-      }
-
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/auth/session`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setUser(data.user);
-      }
-    } catch (error) {
-      console.error('Error fetching user profile:', error);
-    }
-  };
-
-  const login = async (email: string, password: string) => {
-    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
+  useEffect(() => {
+    // Initialize session from Supabase
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setState(prev => ({
+        ...prev,
+        session,
+        user: session?.user ?? null,
+        loading: false,
+      }));
+      if (session) fetchProfile();
     });
 
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Login failed');
-    }
-
-    const data = await response.json();
-    setUser(data.user);
-    localStorage.setItem('token', data.token);
-  };
-
-  const signup = async (email: string, password: string, username: string) => {
-    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/auth/signup`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, username }),
+    // Listen for auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setState(prev => ({
+        ...prev,
+        session,
+        user: session?.user ?? null,
+        loading: false,
+        requires2FA: session ? prev.requires2FA : false,
+        twoFactorVerified: session ? prev.twoFactorVerified : false,
+      }));
+      if (session) {
+        fetchProfile();
+      } else {
+        setState(prev => ({ ...prev, profile: null }));
+      }
     });
 
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Signup failed');
+    return () => subscription.unsubscribe();
+  }, [fetchProfile]);
+
+  const signIn = async (email: string, password: string) => {
+    const { error, data } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw new Error(error.message);
+
+    // Check if 2FA is required via our API
+    try {
+      const result = await api.post<{ requires2FA: boolean }>('/api/auth/login', { email, password });
+      if (result.requires2FA) {
+        setState(prev => ({ ...prev, requires2FA: true, twoFactorVerified: false }));
+      }
+      return { requires2FA: result.requires2FA };
+    } catch {
+      // If the API check fails, proceed without 2FA
     }
 
-    const data = await response.json();
-    setUser(data.user);
-    localStorage.setItem('token', data.token);
+    void data;
+    return { requires2FA: false };
   };
 
-  const logout = async () => {
+  const signUp = async (email: string, password: string, username: string) => {
+    await api.post('/api/auth/register', { email, password, username });
+  };
+
+  const signOut = async () => {
     await supabase.auth.signOut();
-    setUser(null);
-    localStorage.removeItem('token');
+    setState(prev => ({
+      ...prev,
+      session: null,
+      user: null,
+      profile: null,
+      requires2FA: false,
+      twoFactorVerified: false,
+    }));
   };
 
-  const refreshUser = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session?.user) {
-      await fetchUserProfile(session.user);
-    }
+  const verify2FA = async (code: string) => {
+    await api.post('/api/2fa/verify-session', { code });
+    setState(prev => ({ ...prev, requires2FA: false, twoFactorVerified: true }));
+    sessionStorage.setItem('2fa_verified', '1');
+  };
+
+  const refreshProfile = async () => {
+    await fetchProfile();
+  };
+
+  const updateProfile = async (data: Partial<UserProfile>) => {
+    const result = await api.put<{ user: UserProfile }>('/api/users/me', data);
+    setState(prev => ({ ...prev, profile: result.user }));
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, signup, logout, refreshUser }}>
+    <AuthContext.Provider value={{ ...state, signIn, signUp, signOut, verify2FA, refreshProfile, updateProfile }}>
       {children}
     </AuthContext.Provider>
   );
@@ -142,8 +146,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth() {
   const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
+  if (!context) throw new Error('useAuth must be used within AuthProvider');
   return context;
 }

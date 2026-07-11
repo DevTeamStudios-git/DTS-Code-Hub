@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
-import { verifyToken } from '../lib/auth';
+import { getSupabaseAdmin } from '../lib/supabase.js';
+import prisma from '../lib/prisma.js';
 
 export interface AuthRequest extends Request {
   user?: {
@@ -9,34 +10,65 @@ export interface AuthRequest extends Request {
   };
 }
 
-export async function authMiddleware(req: AuthRequest, res: Response, next: NextFunction) {
+export async function authMiddleware(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   const authHeader = req.headers.authorization;
-  
+
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Unauthorized' });
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
   }
-  
+
   const token = authHeader.substring(7);
-  const user = await verifyToken(token);
-  
-  if (!user) {
-    return res.status(401).json({ error: 'Invalid token' });
+
+  try {
+    const supabaseAdmin = getSupabaseAdmin();
+    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+
+    if (error || !user) {
+      res.status(401).json({ error: 'Invalid token' });
+      return;
+    }
+
+    const dbUser = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { username: true },
+    });
+
+    req.user = {
+      userId: user.id,
+      email: user.email!,
+      username: dbUser?.username ?? '',
+    };
+    next();
+  } catch {
+    res.status(401).json({ error: 'Invalid token' });
   }
-  
-  req.user = user;
-  next();
 }
 
-export async function optionalAuth(req: AuthRequest, res: Response, next: NextFunction) {
+export async function optionalAuth(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   const authHeader = req.headers.authorization;
-  
+
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.substring(7);
-    const user = await verifyToken(token);
-    if (user) {
-      req.user = user;
+    try {
+      const supabaseAdmin = getSupabaseAdmin();
+      const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+
+      if (!error && user) {
+        const dbUser = await prisma.user.findUnique({
+          where: { id: user.id },
+          select: { username: true },
+        });
+        req.user = {
+          userId: user.id,
+          email: user.email!,
+          username: dbUser?.username ?? '',
+        };
+      }
+    } catch {
+      // silently skip — optional auth
     }
   }
-  
+
   next();
 }

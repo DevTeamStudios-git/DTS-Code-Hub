@@ -1,292 +1,184 @@
 import { Router } from 'express';
-import { supabaseAdmin, getSupabase } from '../lib/supabase';
-import { createToken, verifyToken } from '../lib/auth';
-import { PrismaClient } from '@prisma/client';
+import { getSupabaseAdmin } from '../lib/supabase.js';
+import { authMiddleware } from '../middleware/auth.js';
+import type { AuthRequest } from '../middleware/auth.js';
+import prisma from '../lib/prisma.js';
 
 const router = Router();
-const prisma = new PrismaClient();
 
-// Register a new user
-router.post('/signup', async (req, res) => {
+// POST /api/auth/register
+router.post('/register', async (req, res) => {
   try {
-    const { email, password, username } = req.body;
-    
+    const { email, password, username } = req.body as { email: string; password: string; username: string };
+
     if (!email || !password || !username) {
-      return res.status(400).json({ error: 'Email, password, and username are required' });
+      res.status(400).json({ error: 'Email, password, and username are required' });
+      return;
     }
 
-    // Validate username format
-    if (!/^[a-zA-Z0-9_-]{3,30}$/.test(username)) {
-      return res.status(400).json({ error: 'Username must be 3-30 characters and can only contain letters, numbers, hyphens, and underscores' });
+    if (!/^[a-zA-Z0-9_-]{3,39}$/.test(username)) {
+      res.status(400).json({ error: 'Username must be 3–39 chars, letters/numbers/hyphens/underscores only' });
+      return;
     }
-    
-    // Check if username is already taken
-    const existingProfile = await prisma.profile.findUnique({
-      where: { username }
-    });
 
-    if (existingProfile) {
-      return res.status(400).json({ error: 'Username is already taken' });
+    const existing = await prisma.user.findUnique({ where: { username } });
+    if (existing) {
+      res.status(400).json({ error: 'Username already taken' });
+      return;
     }
-    
-    // Create user in Supabase Auth
-    const { data: authData, error: authError } = await supabaseAdmin.auth.signUp({
-      email,
-      password,
-      options: {
-        data: { username }
-      }
-    });
-    
-    if (authError) {
-      return res.status(400).json({ error: authError.message });
+
+    const supabaseAdmin = getSupabaseAdmin();
+    const { data: authData, error: authError } = await supabaseAdmin.auth.signUp({ email, password });
+
+    if (authError || !authData.user) {
+      res.status(400).json({ error: authError?.message ?? 'Failed to create account' });
+      return;
     }
-    
-    if (!authData.user) {
-      return res.status(400).json({ error: 'Failed to create user' });
-    }
-    
-    // Create profile in database
-    const profile = await prisma.profile.create({
+
+    // Create corresponding user profile in our DB
+    await prisma.user.create({
       data: {
         id: authData.user.id,
         username,
+        email,
         displayName: username,
-      }
-    });
-    
-    // Create JWT token
-    const token = await createToken({
-      userId: authData.user.id,
-      email: authData.user.email!,
-      username: profile.username,
-    });
-    
-    res.status(201).json({
-      user: {
-        id: authData.user.id,
-        email: authData.user.email,
-        username: profile.username,
-        displayName: profile.displayName,
       },
-      token,
     });
-  } catch (error) {
-    console.error('Registration error:', error);
+
+    res.status(201).json({
+      message: 'Account created. Please check your email to confirm your address.',
+      user: { id: authData.user.id, email, username },
+    });
+  } catch (err) {
+    console.error('Register error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Login
+// POST /api/auth/login
 router.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
-    
+    const { email, password } = req.body as { email: string; password: string };
+
     if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required' });
+      res.status(400).json({ error: 'Email and password are required' });
+      return;
     }
-    
-    const { data: authData, error: authError } = await supabaseAdmin.auth.signInWithPassword({
-      email,
-      password,
-    });
-    
-    if (authError) {
-      return res.status(401).json({ error: 'Invalid credentials' });
+
+    const supabaseAdmin = getSupabaseAdmin();
+    const { data: authData, error: authError } = await supabaseAdmin.auth.signInWithPassword({ email, password });
+
+    if (authError || !authData.user) {
+      res.status(401).json({ error: 'Invalid credentials' });
+      return;
     }
-    
-    if (!authData.user) {
-      return res.status(401).json({ error: 'Invalid credentials' });
+
+    const dbUser = await prisma.user.findUnique({ where: { id: authData.user.id } });
+    if (!dbUser) {
+      res.status(401).json({ error: 'User profile not found' });
+      return;
     }
-    
-    // Fetch user profile from database
-    const profile = await prisma.profile.findUnique({
-      where: { id: authData.user.id }
+
+    const has2FA = await prisma.twoFactorSecret.findUnique({
+      where: { userId: dbUser.id, verified: true },
     });
 
-    if (!profile) {
-      return res.status(404).json({ error: 'Profile not found' });
-    }
-    
-    const token = await createToken({
-      userId: authData.user.id,
-      email: authData.user.email!,
-      username: profile.username,
-    });
-    
     res.json({
+      session: authData.session,
       user: {
-        id: authData.user.id,
-        email: authData.user.email,
-        username: profile.username,
-        displayName: profile.displayName,
-        avatarUrl: profile.avatarUrl,
+        id: dbUser.id,
+        email: dbUser.email,
+        username: dbUser.username,
+        displayName: dbUser.displayName,
+        avatarUrl: dbUser.avatarUrl,
+        language: dbUser.language,
       },
-      token,
+      requires2FA: !!has2FA,
     });
-  } catch (error) {
-    console.error('Login error:', error);
+  } catch (err) {
+    console.error('Login error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Logout
-router.post('/logout', async (req, res) => {
+// POST /api/auth/logout
+router.post('/logout', authMiddleware, async (req: AuthRequest, res) => {
   try {
-    const { token } = req.body;
-    
-    if (token) {
-      await supabaseAdmin.auth.signOut();
-    }
-    
+    const authHeader = req.headers.authorization!;
+    const token = authHeader.substring(7);
+    const supabaseAdmin = getSupabaseAdmin();
+    await supabaseAdmin.auth.admin.signOut(token);
     res.json({ message: 'Logged out successfully' });
-  } catch (error) {
-    console.error('Logout error:', error);
+  } catch (err) {
+    console.error('Logout error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Get current session
-router.get('/session', async (req, res) => {
+// GET /api/auth/session
+router.get('/session', authMiddleware, async (req: AuthRequest, res) => {
   try {
-    const authHeader = req.headers.authorization;
-    
-    if (!authHeader) {
-      return res.status(401).json({ error: 'No authorization header' });
+    const dbUser = await prisma.user.findUnique({ where: { id: req.user!.userId } });
+    if (!dbUser) {
+      res.status(404).json({ error: 'User not found' });
+      return;
     }
-    
-    const token = authHeader.replace('Bearer ', '');
-    const payload = await verifyToken(token);
-    
-    if (!payload) {
-      return res.status(401).json({ error: 'Invalid token' });
-    }
-    
-    // Fetch user profile
-    const profile = await prisma.profile.findUnique({
-      where: { id: payload.userId }
-    });
-
-    if (!profile) {
-      return res.status(404).json({ error: 'Profile not found' });
-    }
-    
     res.json({
       user: {
-        id: profile.id,
-        email: payload.email,
-        username: profile.username,
-        displayName: profile.displayName,
-        avatarUrl: profile.avatarUrl,
-        bio: profile.bio,
-        location: profile.location,
-        website: profile.website,
-        company: profile.company,
-      }
+        id: dbUser.id,
+        email: dbUser.email,
+        username: dbUser.username,
+        displayName: dbUser.displayName,
+        avatarUrl: dbUser.avatarUrl,
+        language: dbUser.language,
+        bio: dbUser.bio,
+        location: dbUser.location,
+        website: dbUser.website,
+        company: dbUser.company,
+      },
     });
-  } catch (error) {
-    console.error('Session error:', error);
+  } catch (err) {
+    console.error('Session error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// OAuth - GitHub
-router.post('/oauth/github', async (req, res) => {
+// POST /api/auth/forgot-password
+router.post('/forgot-password', async (req, res) => {
   try {
-    const { code } = req.body;
-    
-    if (!code) {
-      return res.status(400).json({ error: 'Authorization code is required' });
-    }
-    
-    // This will be implemented when GitHub OAuth is configured in Supabase
-    // For now, return a placeholder response
-    res.status(501).json({ error: 'GitHub OAuth not yet configured' });
-  } catch (error) {
-    console.error('GitHub OAuth error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// OAuth - Google
-router.post('/oauth/google', async (req, res) => {
-  try {
-    const { code } = req.body;
-    
-    if (!code) {
-      return res.status(400).json({ error: 'Authorization code is required' });
-    }
-    
-    // This will be implemented when Google OAuth is configured in Supabase
-    // For now, return a placeholder response
-    res.status(501).json({ error: 'Google OAuth not yet configured' });
-  } catch (error) {
-    console.error('Google OAuth error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// OAuth callback handler
-router.get('/oauth/callback', async (req, res) => {
-  try {
-    const { provider, code } = req.query;
-    
-    if (!provider || !code) {
-      return res.status(400).json({ error: 'Provider and code are required' });
-    }
-    
-    // This will be implemented when OAuth providers are configured
-    res.status(501).json({ error: 'OAuth callback not yet implemented' });
-  } catch (error) {
-    console.error('OAuth callback error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Request password reset
-router.post('/reset-password', async (req, res) => {
-  try {
-    const { email } = req.body;
-    
+    const { email } = req.body as { email: string };
     if (!email) {
-      return res.status(400).json({ error: 'Email is required' });
+      res.status(400).json({ error: 'Email is required' });
+      return;
     }
-    
-    const { error } = await supabaseAdmin.auth.resetPasswordForEmail(email, {
-      redirectTo: `${process.env.APP_URL || 'http://localhost:5173'}/reset-password`,
+    const supabaseAdmin = getSupabaseAdmin();
+    await supabaseAdmin.auth.resetPasswordForEmail(email, {
+      redirectTo: `${process.env.WEB_URL ?? 'http://localhost:5173'}/auth/reset-password`,
     });
-    
-    if (error) {
-      return res.status(400).json({ error: error.message });
-    }
-    
-    res.json({ message: 'Password reset email sent' });
-  } catch (error) {
-    console.error('Password reset error:', error);
+    res.json({ message: 'If an account exists, a reset email has been sent.' });
+  } catch (err) {
+    console.error('Forgot password error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Confirm password reset with new password
-router.post('/confirm-reset', async (req, res) => {
+// POST /api/auth/reset-password
+router.post('/reset-password', authMiddleware, async (req: AuthRequest, res) => {
   try {
-    const { token, password } = req.body;
-    
-    if (!token || !password) {
-      return res.status(400).json({ error: 'Token and password are required' });
+    const { password } = req.body as { password: string };
+    if (!password || password.length < 8) {
+      res.status(400).json({ error: 'Password must be at least 8 characters' });
+      return;
     }
-    
-    const { error } = await supabaseAdmin.auth.updateUser({
-      password
-    });
-    
+    const supabaseAdmin = getSupabaseAdmin();
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(req.user!.userId, { password });
     if (error) {
-      return res.status(400).json({ error: error.message });
+      res.status(400).json({ error: error.message });
+      return;
     }
-    
     res.json({ message: 'Password updated successfully' });
-  } catch (error) {
-    console.error('Password confirm error:', error);
+  } catch (err) {
+    console.error('Reset password error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
