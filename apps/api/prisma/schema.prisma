@@ -8,7 +8,7 @@ datasource db {
 }
 
 model User {
-  id              String    @id  // Supabase auth user UUID (set on signup)
+  id              String    @id
   username        String    @unique
   email           String    @unique
   displayName     String?
@@ -22,7 +22,7 @@ model User {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  repositories    Repository[]
+  repositories    Repository[]   @relation("OwnedRepos")
   stars           Star[]
   followers       Follow[]             @relation("UserFollowers")
   following       Follow[]             @relation("UserFollowing")
@@ -41,6 +41,51 @@ model User {
   @@index([email])
 }
 
+model Repository {
+  id             String     @id @default(cuid())
+  name           String
+  description    String?
+  visibility     Visibility @default(PUBLIC)
+  isTemplate     Boolean    @default(false)
+  isArchived     Boolean    @default(false)
+  isFork         Boolean    @default(false)
+  forkOfId       String?
+  defaultBranch  String     @default("main")
+  diskPath       String?
+  healthScore    Int        @default(0)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  ownerId        String
+  owner          User       @relation("OwnedRepos", fields: [ownerId], references: [id], onDelete: Cascade)
+  forkOf         Repository?  @relation("RepoForks", fields: [forkOfId], references: [id], onDelete: SetNull)
+  forks          Repository[] @relation("RepoForks")
+
+  stars          Star[]
+  issues         Issue[]
+  pullRequests   PullRequest[]
+  topics              RepositoryTopic[]
+  branchProtections   BranchProtection[]
+
+  @@unique([ownerId, name])
+  @@index([ownerId])
+  @@index([visibility])
+  @@index([isArchived])
+}
+
+model RepositoryTopic {
+  id           String   @id @default(cuid())
+  repositoryId String
+  topic        String
+  createdAt    DateTime @default(now())
+
+  repository   Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([repositoryId, topic])
+  @@index([repositoryId])
+  @@index([topic])
+}
+
 model SSHKey {
   id          String    @id @default(cuid())
   userId      String
@@ -49,9 +94,7 @@ model SSHKey {
   fingerprint String    @unique
   createdAt   DateTime  @default(now())
   lastUsedAt  DateTime?
-
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
   @@index([userId])
 }
 
@@ -62,9 +105,7 @@ model GPGKey {
   publicKey String
   keyName   String?
   createdAt DateTime @default(now())
-
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
   @@index([userId])
 }
 
@@ -78,9 +119,7 @@ model OAuthApp {
   redirectUris String[]
   scopes       String[]
   createdAt    DateTime @default(now())
-
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
   @@index([userId])
 }
 
@@ -93,9 +132,7 @@ model PersonalAccessToken {
   expiresAt  DateTime?
   lastUsedAt DateTime?
   createdAt  DateTime  @default(now())
-
   user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
   @@index([userId])
 }
 
@@ -105,7 +142,6 @@ model TwoFactorSecret {
   verified    Boolean  @default(false)
   backupCodes String[]
   createdAt   DateTime @default(now())
-
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
@@ -115,9 +151,7 @@ model Achievement {
   badgeType String
   earnedAt  DateTime @default(now())
   metadata  Json?
-
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
   @@unique([userId, badgeType])
   @@index([userId])
 }
@@ -126,36 +160,12 @@ model Contribution {
   id               String   @id @default(cuid())
   userId           String
   repositoryId     String?
-  contributionType String   // 'commit', 'pr', 'issue', 'review', 'comment'
+  contributionType String
   contributionDate DateTime @db.Date
   createdAt        DateTime @default(now())
-
   user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
   @@index([userId])
   @@index([contributionDate])
-}
-
-model Repository {
-  id          String     @id @default(cuid())
-  name        String
-  description String?
-  visibility  Visibility @default(PUBLIC)
-  isTemplate  Boolean    @default(false)
-  healthScore Int?
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-
-  ownerId     String
-  owner       User       @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-
-  stars        Star[]
-  issues       Issue[]
-  pullRequests PullRequest[]
-
-  @@unique([ownerId, name])
-  @@index([ownerId])
-  @@index([visibility])
 }
 
 model Star {
@@ -163,10 +173,8 @@ model Star {
   userId       String
   repositoryId String
   createdAt    DateTime @default(now())
-
   user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   repository   Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
-
   @@unique([userId, repositoryId])
   @@index([userId])
   @@index([repositoryId])
@@ -177,10 +185,8 @@ model Follow {
   followerId  String
   followingId String
   createdAt   DateTime @default(now())
-
   follower    User @relation("UserFollowers", fields: [followerId], references: [id], onDelete: Cascade)
   following   User @relation("UserFollowing", fields: [followingId], references: [id], onDelete: Cascade)
-
   @@unique([followerId, followingId])
   @@index([followerId])
   @@index([followingId])
@@ -195,15 +201,11 @@ model Issue {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
   closedAt     DateTime?
-
   repositoryId String
   repository   Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
-
   authorId     String
   author       User       @relation(fields: [authorId], references: [id])
-
   comments     Comment[]
-
   @@unique([repositoryId, number])
   @@index([repositoryId])
   @@index([authorId])
@@ -222,15 +224,11 @@ model PullRequest {
   updatedAt    DateTime         @updatedAt
   mergedAt     DateTime?
   closedAt     DateTime?
-
   repositoryId String
   repository   Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
-
   authorId     String
   author       User       @relation(fields: [authorId], references: [id])
-
   comments     Comment[]
-
   @@unique([repositoryId, number])
   @@index([repositoryId])
   @@index([authorId])
@@ -242,16 +240,12 @@ model Comment {
   body          String
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
-
   authorId      String
   author        User @relation(fields: [authorId], references: [id], onDelete: Cascade)
-
   issueId       String?
   issue         Issue?       @relation(fields: [issueId], references: [id], onDelete: Cascade)
-
   pullRequestId String?
   pullRequest   PullRequest? @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
-
   @@index([authorId])
   @@index([issueId])
   @@index([pullRequestId])
@@ -271,4 +265,21 @@ enum PullRequestState {
   OPEN
   CLOSED
   MERGED
+}
+
+model BranchProtection {
+  id                  String     @id @default(cuid())
+  repositoryId        String
+  branch              String
+  requirePullRequest  Boolean    @default(false)
+  requireStatusChecks Boolean    @default(false)
+  restrictPushes      Boolean    @default(false)
+  allowedPushers      String[]
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+
+  repository          Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([repositoryId, branch])
+  @@index([repositoryId])
 }
