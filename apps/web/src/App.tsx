@@ -47,6 +47,7 @@ function AppShell() {
         {/* Public */}
         <Route path="/"                     element={<Home />} />
         <Route path="/explore"              element={<ExplorePage />} />
+        <Route path="/search"               element={<P label="Search — Phase 8" />} />
         <Route path="/auth/signin"          element={<SignIn />} />
         <Route path="/auth/signup"          element={<SignUp />} />
         <Route path="/auth/forgot-password" element={<ForgotPassword />} />

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { TOTP, generateURI } from 'otplib';
+import { TOTP, generateURI, NobleCryptoPlugin, ScureBase32Plugin } from 'otplib';
 import { randomBytes } from 'crypto';
 import QRCode from 'qrcode';
 import { authMiddleware } from '../middleware/auth.js';
@@ -7,7 +7,7 @@ import type { AuthRequest } from '../middleware/auth.js';
 import prisma from '../lib/prisma.js';
 
 const router = Router();
-const totp = new TOTP();
+const totp = new TOTP({ crypto: new NobleCryptoPlugin(), base32: new ScureBase32Plugin() });
 
 function generateBackupCodes(count = 8): string[] {
   return Array.from({ length: count }, () =>
