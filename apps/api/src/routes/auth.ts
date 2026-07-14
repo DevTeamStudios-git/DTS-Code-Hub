@@ -115,6 +115,70 @@ router.post('/logout', authMiddleware, async (req: AuthRequest, res) => {
   }
 });
 
+// POST /api/auth/oauth-callback — create local profile after OAuth sign-in
+router.post('/oauth-callback', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const token = authHeader.substring(7);
+    const supabaseAdmin = getSupabaseAdmin();
+    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+
+    if (error || !user) {
+      res.status(401).json({ error: 'Invalid token' });
+      return;
+    }
+
+    if (!user.email) {
+      res.status(400).json({ error: 'Email is required' });
+      return;
+    }
+
+    let dbUser = await prisma.user.findUnique({ where: { id: user.id } });
+
+    if (!dbUser) {
+      let username = user.email.split('@')[0].replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase();
+      if (!username || username.length < 3) username = `user${Math.random().toString(36).slice(2, 7)}`;
+      if (username.length > 39) username = username.slice(0, 39);
+
+      const existing = await prisma.user.findUnique({ where: { username } });
+      if (existing) {
+        username = `${username.slice(0, 34)}_${Math.random().toString(36).slice(2, 7)}`;
+      }
+
+      dbUser = await prisma.user.create({
+        data: {
+          id: user.id,
+          email: user.email,
+          username,
+          displayName: user.user_metadata?.full_name ?? user.email.split('@')[0],
+          avatarUrl: user.user_metadata?.avatar_url ?? user.user_metadata?.picture ?? null,
+        },
+      });
+    }
+
+    res.json({
+      user: {
+        id: dbUser.id,
+        username: dbUser.username,
+        displayName: dbUser.displayName,
+        avatarUrl: dbUser.avatarUrl,
+        bio: dbUser.bio,
+        location: dbUser.location,
+        website: dbUser.website,
+        company: dbUser.company,
+      },
+    });
+  } catch (err) {
+    console.error('OAuth callback error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // GET /api/auth/session
 router.get('/session', authMiddleware, async (req: AuthRequest, res) => {
   try {

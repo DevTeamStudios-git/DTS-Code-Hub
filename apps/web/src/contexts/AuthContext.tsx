@@ -28,6 +28,7 @@ interface AuthState {
 interface AuthContextType extends AuthState {
   signIn: (email: string, password: string) => Promise<{ requires2FA: boolean }>;
   signUp: (email: string, password: string, username: string) => Promise<void>;
+  signInWithOAuth: (provider: 'github' | 'google') => Promise<void>;
   signOut: () => Promise<void>;
   verify2FA: (code: string) => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -110,6 +111,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await api.post('/api/auth/register', { email, password, username });
   };
 
+  const signInWithOAuth = async (provider: 'github' | 'google') => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback`,
+      },
+    });
+    if (error) throw new Error(error.message);
+  };
+
   const signOut = async () => {
     await supabase.auth.signOut();
     setState(prev => ({
@@ -138,7 +149,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ ...state, signIn, signUp, signOut, verify2FA, refreshProfile, updateProfile }}>
+    <AuthContext.Provider value={{ ...state, signIn, signUp, signInWithOAuth, signOut, verify2FA, refreshProfile, updateProfile }}>
       {children}
     </AuthContext.Provider>
   );

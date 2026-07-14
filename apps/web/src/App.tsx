@@ -9,6 +9,7 @@ import SignUp          from './pages/auth/SignUp';
 import ForgotPassword  from './pages/auth/ForgotPassword';
 import ResetPassword   from './pages/auth/ResetPassword';
 import TwoFactorVerify from './pages/auth/TwoFactorVerify';
+import Callback         from './pages/auth/Callback';
 // Profile
 import ProfilePage from './pages/profile/ProfilePage';
 // Settings
@@ -53,6 +54,7 @@ function AppShell() {
         <Route path="/auth/forgot-password" element={<ForgotPassword />} />
         <Route path="/auth/reset-password"  element={<ResetPassword />} />
         <Route path="/auth/2fa"             element={<TwoFactorVerify />} />
+        <Route path="/auth/callback"        element={<Callback />} />
 
         {/* New repo */}
         <Route path="/new"        element={<ProtectedRoute><NewRepoPage /></ProtectedRoute>} />
