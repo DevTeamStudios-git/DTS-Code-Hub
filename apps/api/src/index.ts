@@ -23,9 +23,6 @@ app.use(cors({
   credentials: true,
 }));
 
-// Larger body limit for zip uploads
-app.use(express.json({ limit: '55mb' }));
-
 // Raw body passthrough for git Smart HTTP (must come before json middleware for these routes)
 app.use((req, res, next) => {
   const isGitRoute = req.path.includes('.git/');
@@ -35,6 +32,9 @@ app.use((req, res, next) => {
     next();
   }
 });
+
+// Larger body limit for zip uploads
+app.use(express.json({ limit: '55mb' }));
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', service: 'dts-code-hub-api', version: '3.0.0' });

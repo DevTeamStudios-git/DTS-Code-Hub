@@ -515,12 +515,10 @@ router.get('/explore', async (req, res) => {
     const repos = await prisma.repository.findMany({
       where: {
         visibility: 'PUBLIC',
-        isArchived: false,
         ...(search ? { OR: [
           { name: { contains: search, mode: 'insensitive' } },
           { description: { contains: search, mode: 'insensitive' } },
         ]} : {}),
-        ...(topic ? { topics: { some: { topic } } } : {}),
       },
       include: {
         owner: { select: { username: true, avatarUrl: true } },
