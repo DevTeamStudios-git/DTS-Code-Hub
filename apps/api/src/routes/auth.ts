@@ -7,8 +7,6 @@ import prisma from '../lib/prisma.js';
 const router = Router();
 
 // POST /api/auth/register
-// Register endpoint is now handled by /signup
-// This route is kept for backward compatibility but redirects to signup
 router.post('/register', async (req, res) => {
   try {
     const { email, password, username } = req.body as { email: string; password: string; username: string };
@@ -89,9 +87,11 @@ router.post('/login', async (req, res) => {
       session: authData.session,
       user: {
         id: dbUser.id,
+        email: dbUser.email,
         username: dbUser.username,
         displayName: dbUser.displayName,
         avatarUrl: dbUser.avatarUrl,
+        language: dbUser.language,
       },
       requires2FA: !!has2FA,
     });
@@ -190,9 +190,11 @@ router.get('/session', authMiddleware, async (req: AuthRequest, res) => {
     res.json({
       user: {
         id: dbUser.id,
+        email: dbUser.email,
         username: dbUser.username,
         displayName: dbUser.displayName,
         avatarUrl: dbUser.avatarUrl,
+        language: dbUser.language,
         bio: dbUser.bio,
         location: dbUser.location,
         website: dbUser.website,

@@ -214,23 +214,18 @@ git push origin main`}
                   </div>
                 </div>
               ) : (
-                <div className="divide-y divide-gray-800/50">
-                  {/* Stub file rows — Phase 4 replaces with real tree */}
-                  {['src/', 'public/', 'README.md', 'package.json', '.gitignore'].map(item => (
-                    <div
-                      key={item}
-                      className="flex items-center gap-3 px-4 py-2.5 hover:bg-white/[0.02] transition-colors cursor-default"
-                    >
-                      <FileCode2 className="w-4 h-4 text-gray-600 shrink-0" />
-                      <span className="text-gray-300 text-sm flex-1">{item}</span>
-                      <span className="text-gray-700 text-xs hidden md:block">
-                        {new Date(repo.updatedAt).toLocaleDateString()}
-                      </span>
-                    </div>
-                  ))}
-                  <div className="px-4 py-2 text-center">
-                    <p className="text-gray-700 text-xs">Full file browser — Phase 4</p>
-                  </div>
+                /* Redirect into the real file tree */
+                <div className="p-6 flex flex-col items-center gap-3">
+                  <FileCode2 className="w-8 h-8 text-gray-700" />
+                  <p className="text-gray-500 text-sm">Browse the repository files</p>
+                  <Link
+                    to={`/${username}/${repoName}/tree/${activeBranch}`}
+                    className="flex items-center gap-2 px-5 py-2 rounded-lg text-white text-sm font-medium hover:opacity-90 transition-opacity"
+                    style={{ background: 'linear-gradient(to right, #3B5BFE, #8B3BFE)' }}
+                  >
+                    <FileCode2 className="w-4 h-4" />
+                    Browse files
+                  </Link>
                 </div>
               )}
             </div>

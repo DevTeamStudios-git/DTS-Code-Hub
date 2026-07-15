@@ -26,12 +26,5 @@
   "engines": {
     "node": ">=18.0.0",
     "npm": ">=9.0.0"
-  },
-  "allowScripts": {
-    "@prisma/client@5.22.0": true,
-    "@prisma/engines@5.22.0": true
-  },
-  "dependencies": {
-    "@supabase/supabase-js": "^2.110.3"
   }
 }

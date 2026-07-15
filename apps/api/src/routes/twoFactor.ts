@@ -53,7 +53,6 @@ router.post('/verify', authMiddleware, async (req: AuthRequest, res) => {
     if (!twoFactor) { res.status(400).json({ error: '2FA setup not initiated' }); return; }
 
     const isValid = totp.verify(code, { secret: twoFactor.secret });
-
     if (!isValid) { res.status(400).json({ error: 'Invalid verification code' }); return; }
 
     const backupCodes = generateBackupCodes();
@@ -107,7 +106,6 @@ router.post('/disable', authMiddleware, async (req: AuthRequest, res) => {
     if (!twoFactor?.verified) { res.status(400).json({ error: '2FA is not enabled' }); return; }
 
     const isValid = totp.verify(code, { secret: twoFactor.secret });
-
     if (!isValid) { res.status(400).json({ error: 'Invalid code' }); return; }
 
     await prisma.twoFactorSecret.delete({ where: { userId: req.user!.userId } });
