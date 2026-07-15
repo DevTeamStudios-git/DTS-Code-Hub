@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { GitCommit, GitBranch, Search, BookOpen } from 'lucide-react';
 import FileTree, { type TreeEntry } from '../../components/repo/FileTree';
 import FileRenderer, { type FileData } from '../../components/repo/FileRenderer';
@@ -24,6 +24,7 @@ interface RepoMeta {
 
 export default function FileTreePage() {
   const { profile } = useAuth();
+  const navigate = useNavigate();
   const { username, repo: repoName, branch = 'main', '*': wildcard = '' } = useParams<{
     username: string; repo: string; branch: string; '*': string;
   }>();
@@ -33,6 +34,8 @@ export default function FileTreePage() {
   const [repoMeta, setRepoMeta] = useState<RepoMeta | null>(null);
   const [loading,  setLoading]  = useState(true);
   const [searchQ,  setSearchQ]  = useState('');
+  const [showNewFile, setShowNewFile] = useState(false);
+  const [newFileName, setNewFileName] = useState('');
 
   const API_BASE = import.meta.env.VITE_API_URL as string ?? 'http://localhost:3001';
 
@@ -95,8 +98,8 @@ export default function FileTreePage() {
               <div className="flex items-center gap-3 ml-auto text-xs text-gray-600">
                 {profile?.username === username && (
                   <>
-                    <Link
-                      to={`/${username}/${repoName}/edit/${branch}/${wildcard ? wildcard + '/' : ''}newfile.md`}
+                    <button
+                      onClick={() => setShowNewFile(true)}
                       className="flex items-center gap-1 hover:text-gray-400 transition-colors"
                       title="Create new file"
                     >
@@ -104,7 +107,14 @@ export default function FileTreePage() {
                         <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
                       </svg>
                       Add file
-                    </Link>
+                    </button>
+                    <label className="flex items-center gap-1 hover:text-gray-400 transition-colors cursor-pointer" title="Upload files">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 16V4m0 0L8 8m4-4l4 4M4 16v2a3 3 0 003 3h10a3 3 0 003-3v-2" />
+                      </svg>
+                      Upload files
+                      <input type="file" multiple className="hidden" onChange={() => {}} />
+                    </label>
                     <span className="text-gray-700">·</span>
                   </>
                 )}
@@ -212,6 +222,56 @@ git push origin main`}
           </aside>
         </div>
       </div>
+
+      {/* New file dialog */}
+      {showNewFile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => { setShowNewFile(false); setNewFileName(''); }}>
+          <div className="bg-navy-800 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4" onClick={e => e.stopPropagation()}>
+            <h3 className="text-white text-lg font-semibold mb-4">Create new file</h3>
+            <input
+              type="text"
+              value={newFileName}
+              onChange={e => setNewFileName(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && newFileName.trim()) {
+                  navigate(`/${username}/${repoName}/edit/${branch}/${wildcard ? wildcard + '/' : ''}${newFileName.trim()}`);
+                  setShowNewFile(false);
+                  setNewFileName('');
+                }
+                if (e.key === 'Escape') {
+                  setShowNewFile(false);
+                  setNewFileName('');
+                }
+              }}
+              placeholder="filename.md"
+              className="w-full bg-navy-900 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-accent-start mb-4"
+              autoFocus
+            />
+            <div className="flex items-center gap-3 justify-end">
+              <button
+                onClick={() => { setShowNewFile(false); setNewFileName(''); }}
+                className="px-4 py-2 border border-gray-700 rounded-lg text-gray-400 hover:text-white hover:border-gray-500 text-sm transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (newFileName.trim()) {
+                    navigate(`/${username}/${repoName}/edit/${branch}/${wildcard ? wildcard + '/' : ''}${newFileName.trim()}`);
+                    setShowNewFile(false);
+                    setNewFileName('');
+                  }
+                }}
+                disabled={!newFileName.trim()}
+                className="px-5 py-2 rounded-lg text-white text-sm font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                style={{ background: 'linear-gradient(to right, #3B5BFE, #8B3BFE)' }}
+              >
+                Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

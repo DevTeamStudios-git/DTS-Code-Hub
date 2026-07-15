@@ -41,6 +41,7 @@ export default function FileEditPage() {
 
   const textareaRef  = useRef<HTMLTextAreaElement>(null);
   const lineNumRef   = useRef<HTMLDivElement>(null);
+  const highlightRef = useRef<HTMLPreElement>(null);
   const fileName     = filePath.split('/').pop() ?? filePath;
   const lang         = getLanguage(fileName);
   const isDirty      = content !== original;
@@ -107,6 +108,9 @@ export default function FileEditPage() {
     if (lineNumRef.current && textareaRef.current) {
       lineNumRef.current.scrollTop = textareaRef.current.scrollTop;
     }
+    if (highlightRef.current && textareaRef.current) {
+      highlightRef.current.scrollTop = textareaRef.current.scrollTop;
+    }
   };
 
   const handleSave = async () => {
@@ -119,6 +123,8 @@ export default function FileEditPage() {
         `/api/repos/${username}/${repoName}/edit/${branch}/${filePath}`,
         { content, message: message.trim() },
       );
+      // Brief delay so git index flush completes before redirect
+      await new Promise(r => setTimeout(r, 500));
       navigate(`/${username}/${repoName}/blob/${branch}/${filePath}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Save failed');
@@ -232,7 +238,7 @@ export default function FileEditPage() {
             </table>
           </div>
         ) : (
-          /* Editable textarea with line numbers */
+          /* Editable textarea with syntax highlighting */
           <div className="flex h-full overflow-hidden text-xs font-mono">
             {/* Line numbers */}
             <div
@@ -245,18 +251,29 @@ export default function FileEditPage() {
               ))}
             </div>
 
-            {/* Textarea */}
-            <textarea
-              ref={textareaRef}
-              value={content}
-              onChange={handleChange}
-              onScroll={handleScroll}
-              onKeyDown={handleKeyDown}
-              spellCheck={false}
-              autoComplete="off"
-              className="flex-1 bg-transparent text-gray-200 resize-none focus:outline-none p-2 leading-6 overflow-auto"
-              style={{ tabSize: 2 }}
-            />
+            {/* Highlighted overlay + textarea */}
+            <div className="relative flex-1 overflow-hidden">
+              {/* Highlighted overlay */}
+              <pre
+                ref={highlightRef}
+                className="absolute inset-0 p-2 leading-6 overflow-hidden pointer-events-none text-gray-200"
+                aria-hidden="true"
+              >
+                <code className="hljs" dangerouslySetInnerHTML={{ __html: highlighted + '\n' }} />
+              </pre>
+              {/* Transparent textarea on top */}
+              <textarea
+                ref={textareaRef}
+                value={content}
+                onChange={handleChange}
+                onScroll={handleScroll}
+                onKeyDown={handleKeyDown}
+                spellCheck={false}
+                autoComplete="off"
+                className="absolute inset-0 bg-transparent text-transparent caret-white resize-none focus:outline-none p-2 leading-6 overflow-auto"
+                style={{ tabSize: 2 }}
+              />
+            </div>
           </div>
         )}
       </div>

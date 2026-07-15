@@ -218,9 +218,9 @@ export async function getFileContent(
   try {
     // Get SHA and size first
     const lsRaw = await git.raw(['ls-tree', '-l', branch, '--', filePath]);
-    const match = lsRaw.trim().match(/^\d+\s+blob\s+(\S+)\s+(\d+)/);
+    const match = lsRaw.trim().match(/^(\d+)\s+(blob|tree)\s+(\S+)\s+(\S+)\s+/);
     if (!match) return null;
-    const [, sha, sizeStr] = match;
+    const [, , sha, sizeStr] = match;
     const size = parseInt(sizeStr, 10);
 
     // Limit to 5MB for display

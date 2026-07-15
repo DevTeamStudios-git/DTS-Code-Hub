@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { ChevronDown, ChevronRight, FilePlus, FileMinus, FileEdit, FileSymlink } from 'lucide-react';
 
 interface DiffLine {
@@ -70,9 +70,9 @@ function FileDiff({ file }: { file: DiffFile }) {
             <table className="w-full text-xs font-mono border-collapse">
               <tbody>
                 {file.hunks.map((hunk, hi) => (
-                  <>
+                  <React.Fragment key={`hunk-${hi}`}>
                     {/* Hunk header */}
-                    <tr key={`hunk-${hi}`} className="bg-blue-950/30">
+                    <tr className="bg-blue-950/30">
                       <td colSpan={3} className="px-4 py-1 text-blue-400 select-none text-[11px]">
                         {hunk.header}
                       </td>
@@ -107,7 +107,7 @@ function FileDiff({ file }: { file: DiffFile }) {
                         </td>
                       </tr>
                     ))}
-                  </>
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>

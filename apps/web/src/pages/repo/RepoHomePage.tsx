@@ -5,6 +5,7 @@ import RepoHeader from '../../components/repo/RepoHeader';
 import LanguageBar from '../../components/repo/LanguageBar';
 import RepoTopics from '../../components/repo/RepoTopics';
 import BranchSelector from '../../components/repo/BranchSelector';
+import FileTree, { type TreeEntry } from '../../components/repo/FileTree';
 import { api } from '../../lib/api';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -54,11 +55,16 @@ export default function RepoHomePage() {
   const navigate    = useNavigate();
 
   const [data,     setData]     = useState<RepoData | null>(null);
+  const [treeData, setTreeData] = useState<{ entries: (TreeEntry & { lastCommit: CommitMeta | null })[]; dirLastCommit: CommitMeta | null } | null>(null);
   const [loading,  setLoading]  = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [branch,   setBranch]   = useState<string | null>(null);
+  const [showNewFile, setShowNewFile] = useState(false);
+  const [newFileName, setNewFileName] = useState('');
 
   const isOwner = profile?.username === username;
+
+  interface CommitMeta { sha: string; message: string; author: string; date: string }
 
   useEffect(() => {
     if (!username || !repoName) return;
@@ -72,6 +78,14 @@ export default function RepoHomePage() {
       .catch(() => setNotFound(true))
       .finally(() => setLoading(false));
   }, [username, repoName]);
+
+  // Fetch tree data when branch is known
+  useEffect(() => {
+    if (!username || !repoName || !branch) return;
+    api.get<{ entries: (TreeEntry & { lastCommit: CommitMeta | null })[]; dirLastCommit: CommitMeta | null }>(`/api/repos/${username}/${repoName}/tree/${branch}`)
+      .then(setTreeData)
+      .catch(() => setTreeData(null));
+  }, [username, repoName, branch]);
 
   if (loading) {
     return (
@@ -181,6 +195,28 @@ export default function RepoHomePage() {
                   onChange={setBranch}
                 />
                 <div className="flex items-center gap-3">
+                  {isOwner && (
+                    <>
+                      <button
+                        onClick={() => setShowNewFile(true)}
+                        className="flex items-center gap-1 text-gray-500 hover:text-white text-xs transition-colors"
+                        title="Create new file"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                        </svg>
+                        Add file
+                      </button>
+                      <label className="flex items-center gap-1 text-gray-500 hover:text-white text-xs transition-colors cursor-pointer" title="Upload files">
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 16V4m0 0L8 8m4-4l4 4M4 16v2a3 3 0 003 3h10a3 3 0 003-3v-2" />
+                        </svg>
+                        Upload files
+                        <input type="file" multiple className="hidden" onChange={() => {}} />
+                      </label>
+                      <span className="text-gray-700">·</span>
+                    </>
+                  )}
                   <Link
                     to={`/${username}/${repoName}/commits/${activeBranch}`}
                     className="flex items-center gap-1.5 text-gray-500 hover:text-white text-xs transition-colors"
@@ -214,19 +250,14 @@ git push origin main`}
                   </div>
                 </div>
               ) : (
-                /* Redirect into the real file tree */
-                <div className="p-6 flex flex-col items-center gap-3">
-                  <FileCode2 className="w-8 h-8 text-gray-700" />
-                  <p className="text-gray-500 text-sm">Browse the repository files</p>
-                  <Link
-                    to={`/${username}/${repoName}/tree/${activeBranch}`}
-                    className="flex items-center gap-2 px-5 py-2 rounded-lg text-white text-sm font-medium hover:opacity-90 transition-opacity"
-                    style={{ background: 'linear-gradient(to right, #3B5BFE, #8B3BFE)' }}
-                  >
-                    <FileCode2 className="w-4 h-4" />
-                    Browse files
-                  </Link>
-                </div>
+                <FileTree
+                  username={username!}
+                  repoName={repoName!}
+                  branch={activeBranch}
+                  subPath=""
+                  entries={treeData?.entries ?? []}
+                  dirLastCommit={treeData?.dirLastCommit ?? null}
+                />
               )}
             </div>
 
@@ -332,6 +363,56 @@ git push origin main`}
           </aside>
         </div>
       </div>
+
+      {/* New file dialog */}
+      {showNewFile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => { setShowNewFile(false); setNewFileName(''); }}>
+          <div className="bg-navy-800 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4" onClick={e => e.stopPropagation()}>
+            <h3 className="text-white text-lg font-semibold mb-4">Create new file</h3>
+            <input
+              type="text"
+              value={newFileName}
+              onChange={e => setNewFileName(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && newFileName.trim()) {
+                  navigate(`/${username}/${repoName}/edit/${activeBranch}/${newFileName.trim()}`);
+                  setShowNewFile(false);
+                  setNewFileName('');
+                }
+                if (e.key === 'Escape') {
+                  setShowNewFile(false);
+                  setNewFileName('');
+                }
+              }}
+              placeholder="filename.md"
+              className="w-full bg-navy-900 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-accent-start mb-4"
+              autoFocus
+            />
+            <div className="flex items-center gap-3 justify-end">
+              <button
+                onClick={() => { setShowNewFile(false); setNewFileName(''); }}
+                className="px-4 py-2 border border-gray-700 rounded-lg text-gray-400 hover:text-white hover:border-gray-500 text-sm transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (newFileName.trim()) {
+                    navigate(`/${username}/${repoName}/edit/${activeBranch}/${newFileName.trim()}`);
+                    setShowNewFile(false);
+                    setNewFileName('');
+                  }
+                }}
+                disabled={!newFileName.trim()}
+                className="px-5 py-2 rounded-lg text-white text-sm font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                style={{ background: 'linear-gradient(to right, #3B5BFE, #8B3BFE)' }}
+              >
+                Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
